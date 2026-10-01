@@ -1,15 +1,19 @@
 // Copyright (c) 2026 Dm1stry
 // SPDX-License-Identifier: MIT
 
-#ifndef CCC_SPSC_QUEUE_HPP
-#define CCC_SPSC_QUEUE_HPP
+#ifndef CCC_WAIT_FREE_SPSC_QUEUE_HPP
+#define CCC_WAIT_FREE_SPSC_QUEUE_HPP
 
 #include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <concepts>
 #include <optional>
+#include <type_traits>
+#include <utility>
 #include <memory>
+
+#include "ccc/detail/cache_line.hpp"
 
 namespace ccc::wait_free {
 
@@ -55,31 +59,24 @@ public:
 	bool empty() const noexcept;
 
 private:
-	inline std::size_t next_index(const std::size_t index) const noexcept;
+	std::size_t next_index(const std::size_t index) const noexcept;
 
-#ifdef __cpp_lib_hardware_interference_size
-	static constexpr std::size_t hardware_destructive_interference_size =
-	    std::hardware_destructive_interference_size;
-#else
-	// 64 bytes on x86-64 │ L1_CACHE_BYTES │ L1_CACHE_SHIFT │
-	// __cacheline_aligned │ ...
-	static constexpr std::size_t hardware_destructive_interference_size = 64;
-#endif
 
-	alignas(hardware_destructive_interference_size) 
-	std::atomic<std::size_t> head_{0};          // index of last pushed element of the ring buffer
+
+	alignas(detail::kDestructiveInterferenceSize) 
+	std::atomic<std::size_t> head_{0};          // index of last popped element of the ring buffer (last free element)
 	
-	alignas(hardware_destructive_interference_size) 
-	std::size_t              head_cached_{0};   // cached index of last pushed element of the ring buffer (to reduce amount of atomic loads)
+	alignas(detail::kDestructiveInterferenceSize) 
+	std::size_t              head_cached_{0};   // cached index of last popped element of the ring buffer (to reduce amount of atomic loads)
 	
-	alignas(hardware_destructive_interference_size) 
-	std::atomic<std::size_t> tail_{0};          // index of last popped element of the ring buffer (last free element)
+	alignas(detail::kDestructiveInterferenceSize) 
+	std::atomic<std::size_t> tail_{0};          // index of last pushed element of the ring buffer
 	
-	alignas(hardware_destructive_interference_size) 
-	std::size_t              tail_cached_{0};   // cached index of last popped element of the ring buffer (to
+	alignas(detail::kDestructiveInterferenceSize) 
+	std::size_t              tail_cached_{0};   // cached index of last pushed element of the ring buffer (to
 	         									// reduce amount of atomic loads)
 
-	alignas(hardware_destructive_interference_size) 
+	alignas(detail::kDestructiveInterferenceSize) 
 	const std::size_t        capacity_;
 
     [[no_unique_address]] 
@@ -90,10 +87,12 @@ private:
 template <typename T, typename Allocator>
 spsc_queue<T, Allocator>::spsc_queue(std::size_t capacity, const Allocator& allocator)
  :  capacity_(capacity + 1), //Here we have to add 1 to capacity because we have to keep one empty slot in the ring buffer to distinguish between full and empty states
-	allocator_(allocator),
-    storage_(std::allocator_traits<Allocator>::allocate(allocator_, capacity_))
+	allocator_(allocator)
 {
-	assert(capacity_ != 0); // Buffer size cannot be 0
+	if (capacity >= std::allocator_traits<Allocator>::max_size(allocator_)) { 
+		std::abort();
+	}
+	storage_ = std::allocator_traits<Allocator>::allocate(allocator_, capacity_);
 }
 
 template <typename T, typename Allocator>
@@ -197,8 +196,10 @@ std::size_t spsc_queue<T, Allocator>::capacity() const noexcept
 
 template <typename T, typename Allocator>
 std::size_t spsc_queue<T, Allocator>::size() const noexcept {
-	return tail_.load(std::memory_order_relaxed) -
-	       head_.load(std::memory_order_relaxed);
+	std::size_t head = head_.load(std::memory_order_relaxed);
+	std::size_t tail = tail_.load(std::memory_order_relaxed);
+	std::size_t size = (tail >= head) ? (tail - head) : (capacity_ - head + tail);
+	return size;
 }
 
 template <typename T, typename Allocator>
@@ -216,4 +217,4 @@ std::size_t spsc_queue<T, Allocator>::next_index(
 
 }  // namespace ccc::wait_free
 
-#endif  // CCC_SPSC_QUEUE_HPP
+#endif  // CCC_WAIT_FREE_SPSC_QUEUE_HPP
