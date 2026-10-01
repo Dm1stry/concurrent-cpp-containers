@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check formatting
+        run: git ls-files '*.hpp' '*.cpp' | xargs clang-format-22 --dry-run --Werror
+
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86-64 Linux: both compilers, every sanitizer, newer standards.
+          - name: Linux x64 / GCC 15 / Debug
+            os: ubuntu-26.04
+            preset: debug
+            cmake-args: -DCMAKE_CXX_COMPILER=g++-15
+          - name: Linux x64 / GCC 15 / Release
+            os: ubuntu-26.04
+            preset: release
+            cmake-args: -DCMAKE_CXX_COMPILER=g++-15
+          - name: Linux x64 / GCC 15 / C++23
+            os: ubuntu-26.04
+            preset: debug
+            cmake-args: -DCMAKE_CXX_COMPILER=g++-15 -DCMAKE_CXX_STANDARD=23
+          - name: Linux x64 / GCC 15 / TSan
+            os: ubuntu-26.04
+            preset: tsan
+            cmake-args: -DCMAKE_CXX_COMPILER=g++-15
+          - name: Linux x64 / Clang 22 / Debug
+            os: ubuntu-26.04
+            preset: debug
+            cmake-args: -DCMAKE_CXX_COMPILER=clang++-22
+          - name: Linux x64 / Clang 22 / C++26
+            os: ubuntu-26.04
+            preset: debug
+            cmake-args: -DCMAKE_CXX_COMPILER=clang++-22 -DCMAKE_CXX_STANDARD=26
+          - name: Linux x64 / Clang 22 / ASan+UBSan
+            os: ubuntu-26.04
+            preset: asan
+            cmake-args: -DCMAKE_CXX_COMPILER=clang++-22
+          - name: Linux x64 / Clang 22 / TSan
+            os: ubuntu-26.04
+            preset: tsan
+            cmake-args: -DCMAKE_CXX_COMPILER=clang++-22
+          - name: Linux x64 / GCC 15 / CMake 3.28
+            os: ubuntu-26.04
+            preset: debug
+            cmake-args: -DCMAKE_CXX_COMPILER=g++-15
+            cmake-version: "3.28.*"
+
+          # ARM64 has a weaker memory model than x86-64: missing
+          # acquire/release orders that x86 forgives can fail here.
+          - name: Linux arm64 / GCC 15 / Release
+            os: ubuntu-26.04-arm
+            preset: release
+            cmake-args: -DCMAKE_CXX_COMPILER=g++-15
+          - name: Linux arm64 / Clang 22 / TSan
+            os: ubuntu-26.04-arm
+            preset: tsan
+            cmake-args: -DCMAKE_CXX_COMPILER=clang++-22
+          - name: macOS arm64 / AppleClang / Debug
+            os: macos-26
+            preset: debug
+          - name: macOS arm64 / AppleClang / TSan
+            os: macos-26
+            preset: tsan
+
+          - name: Windows x64 / MSVC / Debug
+            os: windows-2025
+            preset: debug
+          - name: Windows x64 / MSVC / Release
+            os: windows-2025
+            preset: release
+          - name: Windows x64 / MSVC / C++23
+            os: windows-2025
+            preset: debug
+            cmake-args: -DCMAKE_CXX_STANDARD=23
+          - name: Windows arm64 / MSVC / Release
+            os: windows-11-arm
+            preset: release
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Mostly preinstalled on x64; the arm64 image lacks them. Also brings
+      # Clang's sanitizer runtimes.
+      - name: Install compilers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-15 clang-22 libclang-rt-22-dev ninja-build
+
+      - name: Install CMake ${{ matrix.cmake-version }}
+        if: matrix.cmake-version
+        run: |
+          pipx install "cmake==${{ matrix.cmake-version }}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Use Ninja
+        if: runner.os != 'Windows'
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+
+      # Sanitizer runtimes need address-space layouts that the default ASLR
+      # entropy of recent kernels can break.
+      - name: Reduce ASLR entropy for sanitizers
+        if: runner.os == 'Linux' && (matrix.preset == 'asan' || matrix.preset == 'tsan')
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Configure
+        run: cmake --version && cmake --preset ${{ matrix.preset }} -DCCC_WARNINGS_AS_ERRORS=ON ${{ matrix.cmake-args }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  # The newest GCC is not packaged for Ubuntu yet; use the official image.
+  gcc-16:
+    name: Linux x64 / GCC 16 / ${{ matrix.preset }} / C++${{ matrix.std }}
+    runs-on: ubuntu-26.04
+    container: gcc:16
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { preset: debug, std: 20 }
+          - { preset: release, std: 20 }
+          - { preset: debug, std: 26 }
+    steps:
+      - name: Install CMake and Ninja
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: >
+          cmake --preset ${{ matrix.preset }} -G Ninja
+          -DCMAKE_CXX_COMPILER=/usr/local/bin/g++
+          -DCMAKE_CXX_STANDARD=${{ matrix.std }}
+          -DCCC_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}

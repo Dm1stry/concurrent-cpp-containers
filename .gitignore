@@ -1,0 +1,15 @@
+# Build trees (presets build into build/<preset>).
+/build/
+/out/
+
+# Local, per-developer CMake presets.
+CMakeUserPresets.json
+
+# Tooling caches.
+/.cache/
+compile_commands.json
+
+# Editors and IDEs.
+/.vscode/
+/.idea/
+/.vs/
