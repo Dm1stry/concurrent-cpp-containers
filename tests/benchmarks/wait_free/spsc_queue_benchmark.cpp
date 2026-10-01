@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Throughput and round-trip latency of ccc::wait_free::spsc_queue compared with
-// boost::lockfree::spsc_queue and a mutex-protected queue.
+// the queues of other libraries (see references.md) and a mutex-protected queue.
 //
 // Results depend heavily on which cores the two threads run on. For stable
 // numbers pin the process to two physical cores, e.g.
@@ -18,6 +18,7 @@
 #include "boost_queue.hpp"
 #include "ccc/wait_free/spsc_queue.hpp"
 #include "locked_queue.hpp"
+#include "third_party_queues.hpp"
 
 namespace ccc
 {
@@ -26,11 +27,19 @@ namespace
 
 using Value = std::uint64_t;
 
+// Labels the results with the class the adapter wraps, if it is an adapter.
+template <typename Queue>
+void SetQueueLabel(benchmark::State& state)
+{
+	if constexpr (requires { Queue::kName; }) state.SetLabel(Queue::kName);
+}
+
 // The benchmarked thread pushes one element per iteration while a consumer
 // thread pops them. Arg: queue capacity.
 template <typename Queue>
 void BM_Throughput(benchmark::State& state)
 {
+	SetQueueLabel<Queue>(state);
 	Queue                           queue(static_cast<std::size_t>(state.range(0)));
 	const benchmark::IterationCount count = state.max_iterations;
 	std::thread                     consumer(
@@ -63,6 +72,7 @@ void BM_Throughput(benchmark::State& state)
 template <typename Queue>
 void BM_RoundTrip(benchmark::State& state)
 {
+	SetQueueLabel<Queue>(state);
 	Queue                           ping(64);
 	Queue                           pong(64);
 	const benchmark::IterationCount count = state.max_iterations;
@@ -95,24 +105,50 @@ void BM_RoundTrip(benchmark::State& state)
 	echo.join();
 }
 
-BENCHMARK_TEMPLATE(BM_Throughput, wait_free::spsc_queue<Value>)
-	->ArgName("capacity")
-	->RangeMultiplier(16)
-	->Range(64, 1 << 16)
-	->UseRealTime();
-BENCHMARK_TEMPLATE(BM_Throughput, baseline::boost_spsc_queue<Value>)
-	->ArgName("capacity")
-	->RangeMultiplier(16)
-	->Range(64, 1 << 16)
-	->UseRealTime();
-BENCHMARK_TEMPLATE(BM_Throughput, baseline::locked_queue<Value>)
-	->ArgName("capacity")
-	->RangeMultiplier(16)
-	->Range(64, 1 << 16)
-	->UseRealTime();
+// Capacities for BM_Throughput: 64, 256, 4096 and 65536.
+void ThroughputArgs(benchmark::Benchmark* benchmark)
+{
+	benchmark->ArgName("capacity")->RangeMultiplier(16)->Range(64, 1 << 16)->UseRealTime();
+}
+
+// The queue whose capacity is a template argument gets one registration per
+// capacity, with the same arguments as ThroughputArgs.
+template <std::size_t kCapacity>
+using DnedicQueue = baseline::dnedic_spsc_queue<Value, kCapacity>;
+
+BENCHMARK_TEMPLATE(BM_Throughput, wait_free::spsc_queue<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::rigtorp_spsc_queue<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::moodycamel_reader_writer_queue<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::moodycamel_circular_buffer<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::atomic_queue_spsc<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::boost_spsc_queue<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, DnedicQueue<64>)->ArgName("capacity")->Arg(64)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_Throughput, DnedicQueue<256>)->ArgName("capacity")->Arg(256)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_Throughput, DnedicQueue<4096>)->ArgName("capacity")->Arg(4096)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_Throughput, DnedicQueue<65536>)->ArgName("capacity")->Arg(65536)->UseRealTime();
+#if CCC_BENCHMARK_LIBCDS
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::libcds_weak_ring_buffer<Value>)->Apply(ThroughputArgs);
+#endif
+#if CCC_BENCHMARK_XENIUM
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::xenium_vyukov_queue<Value>)->Apply(ThroughputArgs);
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::xenium_nikolaev_queue<Value>)->Apply(ThroughputArgs);
+#endif
+BENCHMARK_TEMPLATE(BM_Throughput, baseline::locked_queue<Value>)->Apply(ThroughputArgs);
 
 BENCHMARK_TEMPLATE(BM_RoundTrip, wait_free::spsc_queue<Value>)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::rigtorp_spsc_queue<Value>)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::moodycamel_reader_writer_queue<Value>)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::moodycamel_circular_buffer<Value>)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::atomic_queue_spsc<Value>)->UseRealTime();
 BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::boost_spsc_queue<Value>)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_RoundTrip, DnedicQueue<64>)->UseRealTime();
+#if CCC_BENCHMARK_LIBCDS
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::libcds_weak_ring_buffer<Value>)->UseRealTime();
+#endif
+#if CCC_BENCHMARK_XENIUM
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::xenium_vyukov_queue<Value>)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::xenium_nikolaev_queue<Value>)->UseRealTime();
+#endif
 BENCHMARK_TEMPLATE(BM_RoundTrip, baseline::locked_queue<Value>)->UseRealTime();
 
 }  // namespace

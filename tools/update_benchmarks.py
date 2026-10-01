@@ -9,8 +9,11 @@ between the benchmark markers in README.md with one table per benchmark.
 
 The tables rely on the naming used in tests/benchmarks:
   BM_<Name><queue type>[/<argument name>:<value>]...
-A benchmark that reports items_per_second is shown as throughput, any other as
-real time per iteration. Each cell is the median of the repetitions.
+Each queue is one row, named by the benchmark's label (the class a baseline
+adapter wraps) or else by its type, and each argument value is one column. A
+benchmark that reports items_per_second is shown as throughput, any other as
+real time per iteration. Each cell is the median of the repetitions followed by
+their coefficient of variation.
 """
 
 import argparse
@@ -30,13 +33,6 @@ README = ROOT / "README.md"
 DEFAULT_BUILD_DIR = ROOT / "build" / "release"
 BEGIN_MARKER = "<!-- benchmarks:begin -->"
 END_MARKER = "<!-- benchmarks:end -->"
-
-# How the baseline queues of tests/benchmarks are named in the tables; every
-# other type is shown as ccc::<type>.
-BASELINE_NAMES = {
-    "baseline::boost_spsc_queue": "boost::lockfree::spsc_queue",
-    "baseline::locked_queue": "std::deque + std::mutex",
-}
 
 # Name parts that describe how a benchmark was run rather than its input.
 RUN_OPTION = re.compile(r"(real_time|process_time|manual_time|min_time:.*|repeats:.*|iterations:.*)")
@@ -148,9 +144,9 @@ def parse_name(run_name):
     return match[1], run_name[match.end() : end], arguments
 
 
-def display_name(type_name):
-    base = re.sub(r"<.*>", "", type_name)
-    return BASELINE_NAMES.get(base, f"ccc::{base}")
+def display_name(entry, type_name):
+    """The class an adapter wraps, from the label it reports, or else the ccc type."""
+    return entry.get("label") or "ccc::" + re.sub(r"<.*>", "", type_name)
 
 
 def format_rate(per_second):
@@ -167,38 +163,61 @@ def format_time(nanoseconds):
     return f"{nanoseconds:.3g} ns"
 
 
-def render_table(family, table):
-    rows = table["rows"]
+def format_spread(cv):
+    """Formats a coefficient of variation (standard deviation / mean)."""
+    return f"±{cv * 100:.1f}%" if cv < 0.01 else f"±{cv * 100:.0f}%"
+
+
+def render_table(family, table, cvs):
+    columns = table["columns"]  # Argument tuples, e.g. (("capacity", "64"),).
+    rows = table["rows"]  # Queue name -> {arguments: median entry}.
     is_rate = all("items_per_second" in entry for row in rows.values() for entry in row.values())
-    title = re.sub(r"(?<!^)(?=[A-Z])", " ", family).capitalize()
-    unit = "items per second, higher is better" if is_rate else "time per iteration, lower is better"
-    argument_names = [name for name, _ in next(iter(rows))]
-    lines = [
-        f"**{title}** ({unit})",
-        "",
-        "| " + " | ".join(argument_names + [f"`{column}`" for column in table["columns"]]) + " |",
-        "|" + "---:|" * (len(argument_names) + len(table["columns"])),
-    ]
+
     def value(entry):
         if is_rate:
             return entry["items_per_second"]
         return entry["real_time"] * NANOSECONDS_PER_UNIT[entry["time_unit"]]
 
-    for arguments, row in rows.items():
-        best =(max if is_rate else min)(value(entry) for entry in row.values())
-        cells = [argument for _, argument in arguments]
-        for column in table["columns"]:
-            if column not in row:
+    def spread(entry):
+        cv = cvs.get(entry["run_name"])
+        if cv is None:
+            return ""
+        return " " + format_spread(cv["items_per_second"] if is_rate else cv["real_time"])
+
+    title = re.sub(r"(?<!^)(?=[A-Z])", " ", family).capitalize()
+    unit = "items per second" if is_rate else "time per iteration"
+    argument_names = sorted({name for arguments in columns for name, _ in arguments})
+    by = f" by {', '.join(argument_names)}" if argument_names else ""
+    better = "higher is better" if is_rate else "lower is better"
+    headers = [", ".join(v for _, v in arguments) or unit.capitalize() for arguments in columns]
+    best = {
+        arguments: (max if is_rate else min)(value(row[arguments]) for row in rows.values() if arguments in row)
+        for arguments in columns
+    }
+    lines = [
+        f"**{title}** ({unit}{by}, {better})",
+        "",
+        "| Queue | " + " | ".join(headers) + " |",
+        "|---|" + "---:|" * len(columns),
+    ]
+    for name, row in rows.items():
+        cells = []
+        for arguments in columns:
+            if arguments not in row:
                 cells.append("")
                 continue
-            text = format_rate(value(row[column])) if is_rate else format_time(value(row[column]))
-            cells.append(f"**{text}**" if value(row[column]) == best else text)
-        lines.append("| " + " | ".join(cells) + " |")
+            number = value(row[arguments])
+            text = format_rate(number) if is_rate else format_time(number)
+            if number == best[arguments]:
+                text = f"**{text}**"
+            cells.append(text + spread(row[arguments]))
+        lines.append(f"| `{name}` | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
 def render(results):
     entries = [entry for entry in results["benchmarks"] if entry.get("aggregate_name") == "median"]
+    cvs = {entry["run_name"]: entry for entry in results["benchmarks"] if entry.get("aggregate_name") == "cv"}
     entries = entries or [entry for entry in results["benchmarks"] if entry.get("run_type") == "iteration"]
     tables = {}
     for entry in entries:
@@ -207,24 +226,24 @@ def render(results):
             continue
         family, type_name, arguments = parsed
         table = tables.setdefault(family, {"columns": [], "rows": {}})
-        column = display_name(type_name)
-        if column not in table["columns"]:
-            table["columns"].append(column)
-        table["rows"].setdefault(tuple(arguments), {})[column] = entry
+        arguments = tuple(arguments)
+        if arguments not in table["columns"]:
+            table["columns"].append(arguments)
+        table["rows"].setdefault(display_name(entry, type_name), {})[arguments] = entry
 
     run = results.get("ccc", {})
     setup = [run.get("cpu"), run.get("os"), run.get("compiler")]
     if run.get("cpus"):
         setup.append("threads pinned to CPUs " + " and ".join(map(str, run["cpus"])))
     if run.get("repetitions", 1) > 1:
-        setup.append(f"median of {run['repetitions']} runs")
+        setup.append(f"median of {run['repetitions']} runs ± coefficient of variation (standard deviation / mean)")
     header = (
         f"<!-- Generated by tools/update_benchmarks.py; do not edit by hand. -->\n"
         f"_Measured on {run.get('date', 'an unknown date')}: "
         + ", ".join(part for part in setup if part)
-        + ". Absolute numbers depend on the machine; compare the columns._"
+        + ". Absolute numbers depend on the machine; compare the queues with each other._"
     )
-    return "\n\n".join([header] + [render_table(family, table) for family, table in tables.items()])
+    return "\n\n".join([header] + [render_table(family, table, cvs) for family, table in tables.items()])
 
 
 def update_readme(markdown):
