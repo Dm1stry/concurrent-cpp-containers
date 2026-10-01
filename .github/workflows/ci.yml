@@ -106,13 +106,14 @@ jobs:
       - uses: actions/checkout@v7
 
       # Mostly preinstalled on x64; the arm64 image lacks them. Also brings
-      # Clang's sanitizer runtimes.
+      # Clang's sanitizer runtimes, and Boost for the benchmarks so that it is
+      # not downloaded on every run.
       - name: Install compilers
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++-15 clang-22 libclang-rt-22-dev ninja-build
+            g++-15 clang-22 libclang-rt-22-dev ninja-build libboost-dev
 
       - name: Install CMake ${{ matrix.cmake-version }}
         if: matrix.cmake-version
@@ -152,10 +153,10 @@ jobs:
           - { preset: release, std: 20 }
           - { preset: debug, std: 26 }
     steps:
-      - name: Install CMake and Ninja
+      - name: Install CMake, Ninja and Boost
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends cmake ninja-build
+          apt-get install -y --no-install-recommends cmake ninja-build libboost-dev
       - uses: actions/checkout@v7
       - name: Configure
         run: >
