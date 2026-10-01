@@ -14,7 +14,7 @@ exceptions disabled.
 
 | Container | Header | Progress guarantee | Status |
 |---|---|---|---|
-| `ccc::spsc_queue`: bounded single-producer single-consumer ring buffer | `ccc/wait_free/spsc_queue.hpp` | wait-free | in progress |
+| `ccc::wait_free::spsc_queue`: bounded single-producer single-consumer ring buffer | `ccc/wait_free/spsc_queue.hpp` | wait-free | in progress |
 | Hazard pointers (API of C++26 `std::hazard_pointer`, P2530) | | | planned |
 | Treiber stack | | lock-free | planned |
 | Michael–Scott queue | | lock-free | planned |
@@ -31,18 +31,18 @@ exceptions disabled.
 #include <ccc/wait_free/spsc_queue.hpp>
 
 int main() {
-  ccc::spsc_queue<int> queue(1024);
+  ccc::wait_free::spsc_queue<int> queue(1024);
 
   std::jthread producer([&queue] {
     for (int i = 0; i < 1000; ++i) {
-      while (!queue.try_push(i)) {
+      while (!queue.push(i)) {
         // Full: retry, back off or drop the value.
       }
     }
   });
 
   for (int received = 0; received < 1000;) {
-    if (std::optional<int> value = queue.try_pop()) {
+    if (std::optional<int> value = queue.pop()) {
       ++received;
     }
   }
@@ -85,7 +85,8 @@ Clang 22, AppleClang and MSVC.
   sufficient.
 - **Style.** [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html),
   except that the public API follows standard-library naming (`spsc_queue`,
-  `try_push`) so the containers read like the standard ones.
+  `push`, `pop`) so the containers read like the standard ones. Namespaces
+  follow the progress guarantee: `ccc::wait_free`, `ccc::lock_free`.
 
 ## Building and testing
 
@@ -136,8 +137,11 @@ cmake --workflow --preset release
 taskset -c 2,4 ./build/release/tests/benchmarks/spsc_queue_benchmark
 ```
 
-The benchmarks compare each container with a mutex-protected equivalent.
-Results will be published here once the implementations are complete.
+The benchmarks compare each container with a mutex-protected equivalent and
+with its [Boost.Lockfree](https://www.boost.org/libs/lockfree) counterpart
+where there is one. An installed Boost is used if CMake finds it; otherwise
+the release is downloaded when the project is configured. Results will be
+published here once the implementations are complete.
 
 ## Related work
 
