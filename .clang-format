@@ -1,5 +1,36 @@
 BasedOnStyle: Google
 IndentWidth: 4
 TabWidth: 4
-UseTab: ForIndentation
+UseTab: AlignWithSpaces
 AccessModifierOffset: -4
+ColumnLimit: 108
+BreakAfterAttributes: Always
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignFunctionDeclarations: false
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 1
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: true
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+ConstructorInitializerIndentWidth: 1
+PackConstructorInitializers: Never

@@ -9,19 +9,25 @@
 
 #include "boost/lockfree/spsc_queue.hpp"
 
-namespace ccc::baseline {
+namespace ccc::baseline
+{
 
 // boost::lockfree::spsc_queue with its capacity set at run time, behind the
 // same push()/pop() interface as the ccc queues. It is the reference lock-free
 // implementation the benchmarks compare against.
 template <typename T>
-class boost_spsc_queue {
+class boost_spsc_queue
+{
 public:
-	explicit boost_spsc_queue(std::size_t capacity) : queue_(capacity) {}
+	explicit boost_spsc_queue(std::size_t capacity)
+	 : queue_(capacity)
+	{
+	}
 
 	bool push(const T& value) { return queue_.push(value); }
 
-	std::optional<T> pop() {
+	std::optional<T> pop()
+	{
 		T value{};
 		if (!queue_.pop(value)) return std::nullopt;
 		return value;

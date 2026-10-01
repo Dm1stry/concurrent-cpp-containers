@@ -10,24 +10,31 @@
 #include <optional>
 #include <utility>
 
-namespace ccc::baseline {
+namespace ccc::baseline
+{
 
 // A bounded FIFO queue guarded by a single std::mutex, with the same
 // push()/pop() interface as the ccc queues. It is the baseline the
 // benchmarks compare against.
 template <typename T>
-class locked_queue {
+class locked_queue
+{
 public:
-	explicit locked_queue(std::size_t capacity) : capacity_(capacity) {}
+	explicit locked_queue(std::size_t capacity)
+	 : capacity_(capacity)
+	{
+	}
 
-	bool push(T value) {
+	bool push(T value)
+	{
 		std::lock_guard lock(mutex_);
 		if (items_.size() == capacity_) return false;
 		items_.push_back(std::move(value));
 		return true;
 	}
 
-	std::optional<T> pop() {
+	std::optional<T> pop()
+	{
 		std::lock_guard lock(mutex_);
 		if (items_.empty()) return std::nullopt;
 		std::optional<T> value(std::move(items_.front()));
@@ -37,8 +44,8 @@ public:
 
 private:
 	const std::size_t capacity_;
-	std::mutex mutex_;
-	std::deque<T> items_;
+	std::mutex        mutex_;
+	std::deque<T>     items_;
 };
 
 }  // namespace ccc::baseline

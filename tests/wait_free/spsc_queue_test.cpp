@@ -16,8 +16,10 @@
 
 #include "gtest/gtest.h"
 
-namespace ccc::wait_free {
-namespace {
+namespace ccc::wait_free
+{
+namespace
+{
 
 // -----------------------------------------------------------------------------
 // Helper types.
@@ -25,24 +27,42 @@ namespace {
 
 // Has no default constructor, which rules out storing elements in a plain
 // `T[]` or `std::vector<T>`.
-struct NoDefault {
-	explicit NoDefault(int v) : value(v) {}
+struct NoDefault
+{
+	explicit NoDefault(int v)
+	 : value(v)
+	{
+	}
 	int value;
 };
 
 // Needs storage aligned beyond `alignof(std::max_align_t)`. UBSan reports a
 // misaligned construction.
-struct alignas(64) OverAligned {
+struct alignas(64) OverAligned
+{
 	std::uint64_t value;
 };
 
 // Keeps `*live` equal to the number of LiveCounter objects that exist, so a
 // leaked or doubly destroyed element shows up in the count.
-class LiveCounter {
+class LiveCounter
+{
 public:
-	explicit LiveCounter(int* live) : live_(live) { ++*live_; }
-	LiveCounter(const LiveCounter& other) : live_(other.live_) { ++*live_; }
-	LiveCounter(LiveCounter&& other) noexcept : live_(other.live_) { ++*live_; }
+	explicit LiveCounter(int* live)
+	 : live_(live)
+	{
+		++*live_;
+	}
+	LiveCounter(const LiveCounter& other)
+	 : live_(other.live_)
+	{
+		++*live_;
+	}
+	LiveCounter(LiveCounter&& other) noexcept
+	 : live_(other.live_)
+	{
+		++*live_;
+	}
 	LiveCounter& operator=(const LiveCounter&) = delete;
 	~LiveCounter() { --*live_; }
 
@@ -51,16 +71,22 @@ private:
 };
 
 // Copying throws if `fail_copy` is set; moving never throws.
-struct ThrowsOnCopy {
+struct ThrowsOnCopy
+{
 	explicit ThrowsOnCopy(int v, bool fail = false)
-	    : value(v), fail_copy(fail) {}
+	 : value(v),
+	   fail_copy(fail)
+	{
+	}
 	ThrowsOnCopy(const ThrowsOnCopy& other)
-	    : value(other.value), fail_copy(other.fail_copy) {
+	 : value(other.value),
+	   fail_copy(other.fail_copy)
+	{
 		if (fail_copy) throw std::runtime_error("copy failed");
 	}
 	ThrowsOnCopy(ThrowsOnCopy&&) noexcept = default;
 
-	int value;
+	int  value;
 	bool fail_copy;
 };
 
@@ -68,34 +94,40 @@ struct ThrowsOnCopy {
 // Single-threaded behaviour.
 // -----------------------------------------------------------------------------
 
-TEST(SpscQueueTest, NewQueueIsEmpty) {
+TEST(SpscQueueTest, NewQueueIsEmpty)
+{
 	spsc_queue<int> queue(4);
 	EXPECT_TRUE(queue.empty());
 	EXPECT_EQ(queue.size(), 0u);
 	EXPECT_EQ(queue.pop(), std::nullopt);
 }
 
-TEST(SpscQueueTest, CapacityIsAtLeastRequested) {
+TEST(SpscQueueTest, CapacityIsAtLeastRequested)
+{
 	constexpr std::size_t kRequested[] = {1, 2, 3, 7, 8, 1000, 1024};
-	for (const std::size_t requested : kRequested) {
+	for (const std::size_t requested : kRequested)
+	{
 		spsc_queue<int> queue(requested);
 		EXPECT_GE(queue.capacity(), requested);
 	}
 }
 
-TEST(SpscQueueTest, PopsInFifoOrder) {
+TEST(SpscQueueTest, PopsInFifoOrder)
+{
 	spsc_queue<int> queue(8);
 	for (int i = 0; i < 5; ++i) ASSERT_TRUE(queue.push(i));
 	for (int i = 0; i < 5; ++i) EXPECT_EQ(queue.pop(), i);
 	EXPECT_EQ(queue.pop(), std::nullopt);
 }
 
-TEST(SpscQueueTest, PushFailsOnlyWhenFull) {
-	spsc_queue<int> queue(4);
+TEST(SpscQueueTest, PushFailsOnlyWhenFull)
+{
+	spsc_queue<int>   queue(4);
 	const std::size_t capacity = queue.capacity();
 	ASSERT_GE(capacity, 4u);
 
-	for (std::size_t i = 0; i < capacity; ++i) {
+	for (std::size_t i = 0; i < capacity; ++i)
+	{
 		ASSERT_TRUE(queue.push(static_cast<int>(i))) << "push #" << i;
 	}
 	EXPECT_FALSE(queue.push(-1));
@@ -106,16 +138,19 @@ TEST(SpscQueueTest, PushFailsOnlyWhenFull) {
 	EXPECT_FALSE(queue.push(-2));
 }
 
-TEST(SpscQueueTest, SizeTracksPushesAndPops) {
+TEST(SpscQueueTest, SizeTracksPushesAndPops)
+{
 	spsc_queue<int> queue(8);
 	ASSERT_GE(queue.capacity(), 8u);
 
-	for (std::size_t i = 0; i < 8; ++i) {
+	for (std::size_t i = 0; i < 8; ++i)
+	{
 		EXPECT_EQ(queue.size(), i);
 		ASSERT_TRUE(queue.push(static_cast<int>(i)));
 	}
 	EXPECT_FALSE(queue.empty());
-	for (std::size_t i = 8; i > 0; --i) {
+	for (std::size_t i = 8; i > 0; --i)
+	{
 		EXPECT_EQ(queue.size(), i);
 		ASSERT_TRUE(queue.pop().has_value());
 	}
@@ -123,29 +158,35 @@ TEST(SpscQueueTest, SizeTracksPushesAndPops) {
 }
 
 // Walks the occupied region around the end of the buffer at every fill level.
-TEST(SpscQueueTest, KeepsFifoOrderAcrossWrapAround) {
-	spsc_queue<int> queue(5);
+TEST(SpscQueueTest, KeepsFifoOrderAcrossWrapAround)
+{
+	spsc_queue<int>   queue(5);
 	const std::size_t capacity = queue.capacity();
 	ASSERT_GE(capacity, 5u);
 
 	int next_push = 0;
 	int next_pop = 0;
-	for (std::size_t in_flight = 0; in_flight < capacity; ++in_flight) {
-		for (std::size_t i = 0; i < in_flight; ++i) {
+	for (std::size_t in_flight = 0; in_flight < capacity; ++in_flight)
+	{
+		for (std::size_t i = 0; i < in_flight; ++i)
+		{
 			ASSERT_TRUE(queue.push(next_push++));
 		}
-		for (std::size_t step = 0; step < 3 * capacity; ++step) {
+		for (std::size_t step = 0; step < 3 * capacity; ++step)
+		{
 			ASSERT_TRUE(queue.push(next_push++));
 			ASSERT_EQ(queue.pop(), next_pop++);
 		}
-		for (std::size_t i = 0; i < in_flight; ++i) {
+		for (std::size_t i = 0; i < in_flight; ++i)
+		{
 			ASSERT_EQ(queue.pop(), next_pop++);
 		}
 		ASSERT_TRUE(queue.empty());
 	}
 }
 
-TEST(SpscQueueTest, SupportsMoveOnlyTypes) {
+TEST(SpscQueueTest, SupportsMoveOnlyTypes)
+{
 	spsc_queue<std::unique_ptr<int>> queue(2);
 	ASSERT_TRUE(queue.push(std::make_unique<int>(42)));
 	std::optional<std::unique_ptr<int>> value = queue.pop();
@@ -154,7 +195,8 @@ TEST(SpscQueueTest, SupportsMoveOnlyTypes) {
 	EXPECT_EQ(**value, 42);
 }
 
-TEST(SpscQueueTest, SupportsTypesWithoutDefaultConstructor) {
+TEST(SpscQueueTest, SupportsTypesWithoutDefaultConstructor)
+{
 	spsc_queue<NoDefault> queue(2);
 	ASSERT_TRUE(queue.push(NoDefault(7)));
 	std::optional<NoDefault> value = queue.pop();
@@ -162,13 +204,17 @@ TEST(SpscQueueTest, SupportsTypesWithoutDefaultConstructor) {
 	EXPECT_EQ(value->value, 7);
 }
 
-TEST(SpscQueueTest, SupportsOverAlignedTypes) {
+TEST(SpscQueueTest, SupportsOverAlignedTypes)
+{
 	spsc_queue<OverAligned> queue(4);
-	for (std::uint64_t round = 0; round < 3; ++round) {
-		for (std::uint64_t i = 0; i < 4; ++i) {
+	for (std::uint64_t round = 0; round < 3; ++round)
+	{
+		for (std::uint64_t i = 0; i < 4; ++i)
+		{
 			ASSERT_TRUE(queue.push(OverAligned{round * 4 + i}));
 		}
-		for (std::uint64_t i = 0; i < 4; ++i) {
+		for (std::uint64_t i = 0; i < 4; ++i)
+		{
 			std::optional<OverAligned> value = queue.pop();
 			ASSERT_TRUE(value.has_value());
 			EXPECT_EQ(value->value, round * 4 + i);
@@ -176,23 +222,27 @@ TEST(SpscQueueTest, SupportsOverAlignedTypes) {
 	}
 }
 
-TEST(SpscQueueTest, EmplaceForwardsArguments) {
+TEST(SpscQueueTest, EmplaceForwardsArguments)
+{
 	spsc_queue<std::pair<int, std::string>> queue(2);
 	ASSERT_TRUE(queue.emplace(7, "seven"));
 	EXPECT_EQ(queue.pop(), std::make_pair(7, std::string("seven")));
 }
 
-TEST(SpscQueueTest, CopyPushLeavesSourceIntact) {
+TEST(SpscQueueTest, CopyPushLeavesSourceIntact)
+{
 	spsc_queue<std::string> queue(2);
-	const std::string source(100, 'x');  // Long enough to live on the heap.
+	const std::string       source(100, 'x');  // Long enough to live on the heap.
 	ASSERT_TRUE(queue.push(source));
 	EXPECT_EQ(source, std::string(100, 'x'));
 	EXPECT_EQ(queue.pop(), source);
 }
 
-TEST(SpscQueueTest, FailedPushLeavesArgumentIntact) {
+TEST(SpscQueueTest, FailedPushLeavesArgumentIntact)
+{
 	spsc_queue<std::unique_ptr<int>> queue(1);
-	for (std::size_t i = 0; i < queue.capacity(); ++i) {
+	for (std::size_t i = 0; i < queue.capacity(); ++i)
+	{
 		ASSERT_TRUE(queue.push(std::make_unique<int>(0)));
 	}
 
@@ -206,7 +256,8 @@ TEST(SpscQueueTest, FailedPushLeavesArgumentIntact) {
 	EXPECT_EQ(*value, 42);
 }
 
-TEST(SpscQueueTest, DestroysEveryElementExactlyOnce) {
+TEST(SpscQueueTest, DestroysEveryElementExactlyOnce)
+{
 	int live = 0;
 	{
 		spsc_queue<LiveCounter> queue(4);
@@ -228,7 +279,8 @@ TEST(SpscQueueTest, DestroysEveryElementExactlyOnce) {
 	EXPECT_EQ(live, 0);
 }
 
-TEST(SpscQueueTest, ThrowingCopyLeavesQueueUnchanged) {
+TEST(SpscQueueTest, ThrowingCopyLeavesQueueUnchanged)
+{
 	spsc_queue<ThrowsOnCopy> queue(4);
 	ASSERT_TRUE(queue.push(ThrowsOnCopy(1)));
 
@@ -261,21 +313,24 @@ constexpr std::size_t kTransferCount = 100'000;
 
 // A push or pop that keeps failing for this long means the other side has
 // stopped making progress, or the queue has lost an update.
-constexpr auto kStallTimeout = std::chrono::seconds(5);
+constexpr auto        kStallTimeout = std::chrono::seconds(5);
 
 // Calls `op` until it returns true. Returns false if that takes longer than
 // kStallTimeout.
 template <typename Op>
-bool RetryUntilSuccess(Op op) {
+bool RetryUntilSuccess(Op op)
+{
 	const auto deadline = std::chrono::steady_clock::now() + kStallTimeout;
-	while (!op()) {
+	while (!op())
+	{
 		if (std::chrono::steady_clock::now() > deadline) return false;
 		std::this_thread::yield();
 	}
 	return true;
 }
 
-struct TransferStats {
+struct TransferStats
+{
 	std::size_t pushed = 0;
 	std::size_t popped = 0;
 	std::size_t mismatches = 0;
@@ -285,25 +340,32 @@ struct TransferStats {
 // calling thread pops them, and counts the popped values for which
 // `matches(value, index)` is false.
 template <typename T, typename Make, typename Matches>
-TransferStats TransferConcurrently(spsc_queue<T>& queue, std::size_t count,
-                                   Make make, Matches matches) {
+TransferStats TransferConcurrently(spsc_queue<T>& queue, std::size_t count, Make make, Matches matches)
+{
 	TransferStats stats;
-	std::thread producer([&queue, &stats, count, &make] {
-		for (; stats.pushed < count; ++stats.pushed) {
-			T value = make(stats.pushed);
-			// Relies on a failed push leaving `value` untouched.
-			if (!RetryUntilSuccess(
-			        [&] { return queue.push(std::move(value)); })) {
-				return;
+	std::thread   producer(
+		[&queue, &stats, count, &make]
+		{
+			for (; stats.pushed < count; ++stats.pushed)
+			{
+				T value = make(stats.pushed);
+				// Relies on a failed push leaving `value` untouched.
+				if (!RetryUntilSuccess([&] { return queue.push(std::move(value)); }))
+				{
+					return;
+				}
 			}
-		}
-	});
-	for (; stats.popped < count; ++stats.popped) {
+		});
+	for (; stats.popped < count; ++stats.popped)
+	{
 		std::optional<T> value;
-		if (!RetryUntilSuccess([&] {
-			    value = queue.pop();
-			    return value.has_value();
-		    })) {
+		if (!RetryUntilSuccess(
+				[&]
+				{
+					value = queue.pop();
+					return value.has_value();
+				}))
+		{
 			break;
 		}
 		if (!matches(*value, stats.popped)) ++stats.mismatches;
@@ -312,7 +374,8 @@ TransferStats TransferConcurrently(spsc_queue<T>& queue, std::size_t count,
 	return stats;
 }
 
-void ExpectCompleteTransfer(const TransferStats& stats) {
+void ExpectCompleteTransfer(const TransferStats& stats)
+{
 	EXPECT_EQ(stats.pushed, kTransferCount) << "the producer stalled";
 	EXPECT_EQ(stats.popped, kTransferCount) << "the consumer stalled";
 	EXPECT_EQ(stats.mismatches, 0u);
@@ -320,74 +383,79 @@ void ExpectCompleteTransfer(const TransferStats& stats) {
 
 // Small capacities keep the queue switching between full and empty, which is
 // where the producer and the consumer actually race.
-class SpscQueueConcurrencyTest : public testing::TestWithParam<std::size_t> {};
+class SpscQueueConcurrencyTest : public testing::TestWithParam<std::size_t>
+{
+};
 
-INSTANTIATE_TEST_SUITE_P(
-    Capacities, SpscQueueConcurrencyTest, testing::Values(1, 2, 64),
-    [](const testing::TestParamInfo<std::size_t>& param_info) {
-	    return "Capacity" + std::to_string(param_info.param);
-    });
+INSTANTIATE_TEST_SUITE_P(Capacities, SpscQueueConcurrencyTest, testing::Values(1, 2, 64),
+                         [](const testing::TestParamInfo<std::size_t>& param_info)
+                         { return "Capacity" + std::to_string(param_info.param); });
 
-TEST_P(SpscQueueConcurrencyTest, PreservesFifoOrder) {
+TEST_P(SpscQueueConcurrencyTest, PreservesFifoOrder)
+{
 	spsc_queue<std::uint64_t> queue(GetParam());
 	ExpectCompleteTransfer(TransferConcurrently(
-	    queue, kTransferCount,
-	    [](std::size_t i) { return static_cast<std::uint64_t>(i); },
-	    [](std::uint64_t value, std::size_t i) { return value == i; }));
+		queue, kTransferCount, [](std::size_t i) { return static_cast<std::uint64_t>(i); },
+		[](std::uint64_t value, std::size_t i) { return value == i; }));
 }
 
 // A 64-byte element takes several stores to write. If the consumer can read a
 // slot before the producer has finished writing it, the words disagree.
-TEST_P(SpscQueueConcurrencyTest, NeverExposesPartiallyWrittenElements) {
-	struct Wide {
+TEST_P(SpscQueueConcurrencyTest, NeverExposesPartiallyWrittenElements)
+{
+	struct Wide
+	{
 		std::uint64_t words[8];
 	};
 	spsc_queue<Wide> queue(GetParam());
 	ExpectCompleteTransfer(TransferConcurrently(
-	    queue, kTransferCount,
-	    [](std::size_t i) {
-		    Wide wide{};
-		    for (std::uint64_t& word : wide.words) word = i;
-		    return wide;
-	    },
-	    [](const Wide& wide, std::size_t i) {
-		    for (const std::uint64_t word : wide.words) {
-			    if (word != i) return false;
-		    }
-		    return true;
-	    }));
+		queue, kTransferCount,
+		[](std::size_t i)
+		{
+			Wide wide{};
+			for (std::uint64_t& word : wide.words) word = i;
+			return wide;
+		},
+		[](const Wide& wide, std::size_t i)
+		{
+			for (const std::uint64_t word : wide.words)
+			{
+				if (word != i) return false;
+			}
+			return true;
+		}));
 }
 
 // Every element owns heap memory that the producer allocates and writes and
 // the consumer reads and frees. A missing happens-before edge shows up as a
 // data race under TSan or as a use-after-free under ASan.
-TEST_P(SpscQueueConcurrencyTest, HandsOverHeapOwningElements) {
-	const auto make = [](std::size_t i) {
-		return std::string(40, 'a') + std::to_string(i);
-	};
+TEST_P(SpscQueueConcurrencyTest, HandsOverHeapOwningElements)
+{
+	const auto              make = [](std::size_t i) { return std::string(40, 'a') + std::to_string(i); };
 	spsc_queue<std::string> queue(GetParam());
-	ExpectCompleteTransfer(
-	    TransferConcurrently(queue, kTransferCount, make,
-	                         [&make](const std::string& value, std::size_t i) {
-		                         return value == make(i);
-	                         }));
+	ExpectCompleteTransfer(TransferConcurrently(queue, kTransferCount, make,
+	                                            [&make](const std::string& value, std::size_t i)
+	                                            { return value == make(i); }));
 }
 
 // `size()`, `empty()` and `capacity()` may be called from any thread.
-TEST_P(SpscQueueConcurrencyTest, ObserversStayInRangeDuringTransfer) {
+TEST_P(SpscQueueConcurrencyTest, ObserversStayInRangeDuringTransfer)
+{
 	spsc_queue<std::uint64_t> queue(GetParam());
-	std::atomic<bool> done{false};
-	std::size_t out_of_range = 0;
-	std::thread observer([&queue, &done, &out_of_range] {
-		while (!done.load(std::memory_order_relaxed)) {
-			if (queue.size() > queue.capacity()) ++out_of_range;
-			static_cast<void>(queue.empty());
-		}
-	});
+	std::atomic<bool>         done{false};
+	std::size_t               out_of_range = 0;
+	std::thread               observer(
+		[&queue, &done, &out_of_range]
+		{
+			while (!done.load(std::memory_order_relaxed))
+			{
+				if (queue.size() > queue.capacity()) ++out_of_range;
+				static_cast<void>(queue.empty());
+			}
+		});
 	ExpectCompleteTransfer(TransferConcurrently(
-	    queue, kTransferCount,
-	    [](std::size_t i) { return static_cast<std::uint64_t>(i); },
-	    [](std::uint64_t value, std::size_t i) { return value == i; }));
+		queue, kTransferCount, [](std::size_t i) { return static_cast<std::uint64_t>(i); },
+		[](std::uint64_t value, std::size_t i) { return value == i; }));
 	done.store(true, std::memory_order_relaxed);
 	observer.join();
 	EXPECT_EQ(out_of_range, 0u);
