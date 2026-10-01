@@ -7,6 +7,7 @@
 // Results depend heavily on which cores the two threads run on. For stable
 // numbers pin the process to two physical cores, e.g.
 //   taskset -c 2,4 ./spsc_queue_benchmark
+// tools/update_benchmarks.py does that and puts the results into README.md.
 
 #include <cstddef>
 #include <cstdint>
@@ -95,14 +96,17 @@ void BM_RoundTrip(benchmark::State& state)
 }
 
 BENCHMARK_TEMPLATE(BM_Throughput, wait_free::spsc_queue<Value>)
+	->ArgName("capacity")
 	->RangeMultiplier(16)
 	->Range(64, 1 << 16)
 	->UseRealTime();
 BENCHMARK_TEMPLATE(BM_Throughput, baseline::boost_spsc_queue<Value>)
+	->ArgName("capacity")
 	->RangeMultiplier(16)
 	->Range(64, 1 << 16)
 	->UseRealTime();
 BENCHMARK_TEMPLATE(BM_Throughput, baseline::locked_queue<Value>)
+	->ArgName("capacity")
 	->RangeMultiplier(16)
 	->Range(64, 1 << 16)
 	->UseRealTime();
