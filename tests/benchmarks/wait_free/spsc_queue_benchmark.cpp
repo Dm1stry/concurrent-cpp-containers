@@ -35,7 +35,9 @@ void SetQueueLabel(benchmark::State& state)
 }
 
 // The benchmarked thread pushes one element per iteration while a consumer
-// thread pops them. Arg: queue capacity.
+// thread pops them and sums their values. Without the sum the compiler could
+// drop the read of each popped slot, and the benchmark would measure only the
+// exchange of indices. Arg: queue capacity.
 template <typename Queue>
 void BM_Throughput(benchmark::State& state)
 {
@@ -45,12 +47,16 @@ void BM_Throughput(benchmark::State& state)
 	std::thread                     consumer(
 		[&queue, count]
 		{
+			Value sum = 0;
 			for (benchmark::IterationCount i = 0; i < count; ++i)
 			{
-				while (!queue.pop().has_value())
+				std::optional<Value> value;
+				while (!(value = queue.pop()))
 				{
 				}
+				sum += *value;
 			}
+			benchmark::DoNotOptimize(sum);
 		});
 
 	Value value = 0;
@@ -92,17 +98,21 @@ void BM_RoundTrip(benchmark::State& state)
 		});
 
 	Value value = 0;
+	Value sum = 0;  // Read every echoed element, as in BM_Throughput.
 	for (auto _ : state)
 	{
 		while (!ping.push(value))
 		{
 		}
-		while (!pong.pop().has_value())
+		std::optional<Value> echoed;
+		while (!(echoed = pong.pop()))
 		{
 		}
+		sum += *echoed;
 		++value;
 	}
 	echo.join();
+	benchmark::DoNotOptimize(sum);
 }
 
 // Capacities for BM_Throughput: 64, 256, 4096 and 65536.
