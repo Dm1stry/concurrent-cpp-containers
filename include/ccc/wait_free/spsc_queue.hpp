@@ -34,6 +34,13 @@ namespace ccc::wait_free
 // Progress: push(), emplace() and pop() are wait-free. Each completes in a
 // bounded number of steps whatever the other thread is doing.
 //
+// Performance: elements are stored contiguously, so small elements share cache
+// lines. When the consumer is slower than the producer, the queue stays full and
+// the producer writes right next to the slot the consumer reads, so their cache
+// line bounces between the cores. For a small T under such load, padding it to a
+// cache line, e.g. `struct alignas(64) padded { T value; };`, can be several
+// times faster at the cost of memory.
+//
 // T must be nothrow move constructible and nothrow destructible; store
 // std::unique_ptr<T> for other types. The queue is neither copyable nor
 // movable.
