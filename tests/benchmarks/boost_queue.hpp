@@ -19,6 +19,8 @@ template <typename T>
 class boost_spsc_queue
 {
 public:
+	static constexpr const char* kName = "boost::lockfree::spsc_queue";
+
 	explicit boost_spsc_queue(std::size_t capacity)
 	 : queue_(capacity)
 	{

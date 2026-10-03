@@ -20,6 +20,8 @@ template <typename T>
 class locked_queue
 {
 public:
+	static constexpr const char* kName = "std::deque + std::mutex";
+
 	explicit locked_queue(std::size_t capacity)
 	 : capacity_(capacity)
 	{

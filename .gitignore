@@ -13,3 +13,5 @@ compile_commands.json
 /.vscode/
 /.idea/
 /.vs/
+
+**/__pycache__/
